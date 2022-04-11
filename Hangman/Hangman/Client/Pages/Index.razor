@@ -1,0 +1,217 @@
+﻿@page "/"
+@using Microsoft.AspNetCore.SignalR.Client
+@using System.Text
+@using System.Runtime.CompilerServices
+@inject NavigationManager NavigationManager
+@inject HttpClient Http
+
+@implements IAsyncDisposable
+
+<PageTitle>Index</PageTitle>
+
+<body style="margin-top: 1rem;">
+    <div class="card mx-auto" style="width: fit-content">
+        <h4 class="text-center" style="margin-top: .25rem">@sign</h4>
+        <div class="card-body">
+        <div class="form-group text-center">
+            <label>
+                <input @bind="userInput" class="form-control" id="email" name="userInput" aria-describedby="emailHelp" placeholder="Enter Username" autofocus/>
+            </label>
+        </div>
+
+        <div class="form-group text-center">
+            <label>
+                <input @bind="passwordInput" style="margin-top: 1rem;" type="password" class="form-control" id="password" name="password" placeholder="Enter Password"/>
+            </label>
+        </div>
+
+            <div class="form-group text-center">
+                <label>
+                    <input @bind="password2Input" input style="margin-bottom: 1rem; margin-top: .5rem; display: @confirmPasswordDisplay" type="password" class="form-control" id="confirmPassword" name="password" placeholder="Confirm Password"/>
+                </label>
+            </div>
+            <div class="text-center" style="color: red; margin-bottom: .5rem">
+                @incorrectText
+            </div>
+            <div style="display: flex; justify-content: center; position: center">
+                <button name="signInBtn" type="submit" class="btn btn-primary" disabled="@(!IsConnected)" @onclick="Authenticate">@sign</button>
+                <label style="vertical-align: middle; position: relative; right: 1%; margin-left: 1rem" class="float-end">
+                    <input style="vertical-align: middle;" @onclick="CreateAccount" class="form-check-input float-end" type="checkbox" id="createAccountCheck" name="createAccountCheck" value="Create Account">
+                    Create Account
+                </label>
+            </div>
+        </div>
+    </div>
+</body>
+
+@code {
+    /// <summary>
+    /// Attributes
+    /// </summary>
+    private HubConnection? hubConnection;
+    private List<string> messages = new List<string>();
+    private string? userInput = "";
+    private string? incorrectText = "";
+    private string? passwordInput = "";
+    private string? password2Input = "";
+    private String confirmPasswordDisplay = "none";
+    private String sign = "Sign in";
+    private int numCreateAccntBtnClicks = 0;
+    private bool isAuthenticated = false;
+    private string? response;
+    private string? username = "";
+    List<string> filelist = new List<string>();
+
+
+
+    /// <summary>
+    /// Set up hub connection upon initialization
+    /// It directs hub actions to Hangman.Server.NotificationHub
+    /// </summary>
+    /// <returns></returns>
+    protected override async Task OnInitializedAsync()
+    {
+        hubConnection = new HubConnectionBuilder()
+            .WithUrl(NavigationManager.ToAbsoluteUri("/notificationhub"))
+            .Build();
+
+        // Receives message from the hub's SendMessage function, then ads it to the messages List, re-renders the page
+        hubConnection.On<string, string>("ReceiveMessage", (user, password) =>
+        {
+            var encodedMsg = $"{user}: {password}";
+            messages.Add(encodedMsg);
+            StateHasChanged();
+        });
+
+        // Receives message from the hub's Authenticate function
+        hubConnection.On<string, string, bool>("LoginConfirmation", (user, password, isAuthenticated) =>
+        {
+            if (isAuthenticated)
+            {
+                HangManPage();
+
+            }
+            else
+            {
+                incorrectText = "Incorrect username or password";
+            }
+            this.isAuthenticated = isAuthenticated;
+            StateHasChanged();
+        });
+
+        // Received message from the hub's NewAccount function
+        hubConnection.On<string, string, bool>("NewAccountConfirmation", (user, password, isAuthenticated) =>
+        {
+            if (isAuthenticated)
+            {
+                HangManPage();
+            }
+            else
+            {
+                incorrectText = "User already exists";
+            }
+            this.isAuthenticated = isAuthenticated;
+            StateHasChanged();
+        });
+        // Starts waiting for hub to initiate contact again
+        await hubConnection.StartAsync();
+
+        //response = await Http.GetStringAsync(@"Asset\Word");
+        // response = await Http.GetStringAsync(@"random_words.txt");
+        response = await Http.GetStringAsync("random_words.txt");
+    }
+
+    /// <summary>
+    /// Sends username and password to hub to be validated
+    /// isAuthenticated will be updated to reflect authentication state upon completion
+    /// </summary>
+    /// <returns></returns>
+    private async Task Authenticate()
+    {        
+        // Call hub with user name and password, will receive authentication status back. 
+        if (hubConnection is not null)
+        {
+            if (confirmPasswordDisplay == "inline")
+            {
+                NewAccount();
+            }
+            else
+            {
+                await hubConnection.SendAsync("Authenticate", userInput, passwordInput);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Submits new user name and password to the hub, where it will be salted, hashed and added to the db as a new user
+    /// </summary>
+    /// <returns></returns>
+    private async Task NewAccount()
+    {
+        // verify the two passwords match
+        if (passwordInput.Equals(password2Input))
+        {
+            // If passwords match, then go to the server to try to create an account
+            if (hubConnection is not null)
+            {
+                await hubConnection.SendAsync("NewAccount", userInput, passwordInput);
+            }
+        }
+        else
+        {
+            incorrectText = "Your passwords didn't match. Try again.";
+            StateHasChanged();
+        } 
+    }
+
+    // Delegate to determine connection state with the hub
+    public bool IsConnected =>
+        hubConnection?.State == HubConnectionState.Connected;
+
+    /// <summary>
+    /// Waits for contact from the hub, then closes the async task?
+    /// </summary>
+    /// <returns></returns>
+    public async ValueTask DisposeAsync()
+    {
+        if (hubConnection is not null)
+        {
+            await hubConnection.DisposeAsync();
+        }
+    }
+    //-----------------------------------------------------------------------Non-Async functions-------------------------------------------------------//
+
+    /// <summary>
+    /// Directs user to the hangman page
+    /// </summary>
+    private void HangManPage()
+    {
+
+            NavigationManager.NavigateTo($"/hangman/{userInput}");
+
+        
+    }
+
+    /// <summary>
+    /// Displays the password confirmation box when creating a new account
+    /// Hides the Sign in button
+    /// </summary>
+    private async Task CreateAccount()
+    {
+        incorrectText = "";
+        if (numCreateAccntBtnClicks == 0)
+        {
+            numCreateAccntBtnClicks++;
+            sign = "Sign Up";
+            confirmPasswordDisplay = "inline";
+        }
+        else
+        {
+            numCreateAccntBtnClicks--;
+            sign = "Sign In";
+            confirmPasswordDisplay = "none";
+            await NewAccount();
+        }
+    }
+
+}
