@@ -13,5 +13,5 @@ This repository contains the course work created for a CS 3750 Software Engineer
 ### Please see the project directories for more information
 Project directories contain:<br>
 - Screenshots
-- READMEsj to describe useage and creation
+- READMEs, to describe useage and creation
 - The code base
